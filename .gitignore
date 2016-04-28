@@ -1,0 +1,8 @@
+
+*.xml
+
+*.csv
+
+.idea/.name
+
+*.iml
