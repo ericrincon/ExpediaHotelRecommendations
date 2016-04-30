@@ -1,5 +1,6 @@
 from keras.models import Sequential
-from keras.layers.core import Dense, Dropout, Activation
+from keras.layers.core import Dense, Dropout, Activation, Flatten
+from keras.layers import Embedding
 from keras.layers.recurrent import LSTM, GRU
 
 from keras.optimizers import SGD
@@ -13,10 +14,41 @@ from sklearn.metrics import accuracy_score
 
 from sklearn.ensemble import RandomForestClassifier
 
+def prep_data(data_frame):
+    destinations_df = pd.read_csv('destinations.csv')
+    srch_destination_ids = destinations_df['srch_destination_id']
+    search_d_ids = data_frame['srch_destination_id']
 
-def build__nn_model():
+    n_ids = search_d_ids.max()
+    print 'N IDs: {}'.format(n_ids)
+    weights = np.zeros((n_ids, 150))
+
+    for i in range(srch_destination_ids.shape[0]):
+        id = srch_destination_ids[i]
+
+        weight = destinations_df[destinations_df['srch_destination_id'] == id]
+
+        weights[i, :] = weight
+
+
+    labels = data_frame['hotel_cluster'].as_matrix()
+
+    X = search_d_ids.as_matrix()
+    y = np.zeros((X.shape[0], 100))
+
+    for i in range(X.shape[0]):
+        label = labels[i]
+        y[i, label] = 1
+
+    return X, y, weights
+
+
+def build_nn_model(vector_len, weights):
     model = Sequential()
-    model.add(Dense(100, input_dim=18))
+    model.add(Embedding(weights.shape[0], vector_len, input_length=1, weights=[weights]))
+    model.add(Flatten())
+    model.add(Dropout(.2))
+    model.add(Dense(100))
     model.add(Activation('relu'))
     model.add(Dropout(.5))
     model.add(Dense(50))
@@ -30,9 +62,9 @@ def build__nn_model():
 def build_rnn_model(n_features, n_timesteps):
     model = Sequential()
     model.add(LSTM(512, return_sequences=True, input_shape=(n_timesteps, n_features)))
-    model.add(Dropout(.2))
+    model.add(Dropout(.5))
     model.add(LSTM(512, return_sequences=False))
-    model.add(Dropout(.2))
+    model.add(Dropout(.5))
     model.add(Dense(100))
     model.add(Activation('softmax'))
 
@@ -40,25 +72,41 @@ def build_rnn_model(n_features, n_timesteps):
 
 def main():
     print 'reading csv...'
+    max_timesteps = 10
+
     df_train = pd.read_csv('train.csv', nrows=10000)
 
-    X, y = prep_data_for_rnn(df_train)
+    print 'preparing data..'
 
+    #X, y = prep_data_for_rnn(df_train, max_timesteps)
+    X, y, weights = prep_data(df_train)
     kf = KFold(X.shape[0], n_folds=5)
-
 
     for fold_i, (train, test) in enumerate(kf):
         print "Fold {}".format(fold_i + 1)
 
-        X_train, y_train = X[train, :, :], y[train]
-        X_test, y_test = X[test, :, :], y[test]
+        x_train, y_train = X[train], y[train]
+        x_test, y_test = X[test], y[test]
 
-        rnn = build_rnn_model(171, 5)
+        X_train = []
+        for x in x_train:
+            X_train.append([x])
+
+        X_test = []
+        for x in x_test:
+            X_test.append([x])
+
+        model = build_nn_model(150, weights)
+        model.compile('adam', 'categorical_crossentropy')
+
+        model.fit(X_train, y_train)
+        """
+        rnn = build_rnn_model(171, max_timesteps)
         rnn.compile('adam', 'categorical_crossentropy')
-        rnn.fit(X_train, y_train)
+        rnn.fit(X_train, y_train, nb_epoch=1)
         predictions = rnn.predict_classes(X_test)
 
-        """
+
         model = build_model()
 
         sgd = SGD(lr=.001)
@@ -72,17 +120,16 @@ def main():
         model.fit(X_train, y_train)
         predictions = model.predict(X_test)
         """
-
-        #y_test = np.argmax(y_test, 1)
+        predictions = model.predict_classes(X_test)
+        y_test = np.argmax(y_test, 1)
         accuracy = accuracy_score(y_test, predictions)
 
         print "Accuracy: {}\n".format(accuracy)
         sys.exit()
 
 # 12 - 13
-def prep_data_for_rnn(data_frame):
+def prep_data_for_rnn(data_frame, max_timesteps):
     len_latent = 150
-    max_timesteps = 5
     destinations_df = pd.read_csv('destinations.csv')
 
     # Fix the date and time
